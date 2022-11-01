@@ -1,2 +1,4 @@
 build32
 build64
+/.vs
+/out/build/x64-Debug
