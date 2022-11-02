@@ -42,6 +42,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <windows.h>
+#include <stdio.h>
 
 #define UNKNOWN_MODULE_ID USHRT_MAX
 
@@ -58,6 +59,7 @@
 #endif
 
 static uint verbose;
+unsigned int crash_idx;
 
 #define NOTIFY(level, fmt, ...) do {          \
     if (verbose >= (level))                   \
@@ -214,6 +216,98 @@ dump_winafl_data()
     dr_write_file(winafl_data.log, winafl_data.afl_area, MAP_SIZE);
 }
 
+const char* get_exception_symbol(DWORD exception_code) {
+
+    switch (exception_code) {
+    case EXCEPTION_ACCESS_VIOLATION:
+
+        return "EXCEPTION_ACCESS_VIOLATION";
+
+    case EXCEPTION_ILLEGAL_INSTRUCTION:
+        return "EXCEPTION_ILLEGAL_INSTRUCTION";
+
+    case EXCEPTION_PRIV_INSTRUCTION:
+        return "EXCEPTION_PRIV_INSTRUCTION";
+
+    case EXCEPTION_INT_DIVIDE_BY_ZERO:
+        return "EXCEPTION_INT_DIVIDE_BY_ZERO";
+
+    case STATUS_HEAP_CORRUPTION:
+        return "STATUS_HEAP_CORRUPTION";
+
+    case EXCEPTION_STACK_OVERFLOW:
+        return "EXCEPTION_STACK_OVERFLOW";
+
+    case STATUS_STACK_BUFFER_OVERRUN:
+        return "STATUS_STACK_BUFFER_OVERRUN";
+
+    case STATUS_FATAL_APP_EXIT:
+        return "STATUS_FATAL_APP_EXIT";
+
+    default:
+        return "EXCEPTION_NAME_NOT_AVAILABLE";
+    }
+
+}
+static bool
+dumpexception(void* drcontext, dr_exception_t* excpt) {
+    crash_idx++;
+    char file_name[100];
+    
+    snprintf(file_name, 100, "crash_%02d.txt", crash_idx);
+    FILE* fp = fopen(file_name, "wb");
+
+    DWORD exception_code = excpt->record->ExceptionCode;
+    fprintf(fp, "%s:\n", get_exception_symbol(exception_code));
+
+    if (excpt) {
+        if (excpt->mcontext) {
+            dr_mcontext_t* ctx = excpt->mcontext;
+            const void* orig_pc = ctx->pc;
+
+            const char* module = "???";
+            size_t offset = (size_t)orig_pc;
+            module_entry_t* entry = module_table_lookup(NULL, 0, module_table, orig_pc);
+
+            if (entry)
+            {
+                module = dr_module_preferred_name(entry->data);
+                offset = (size_t)orig_pc - (size_t)entry->data->start;
+            }
+            fprintf(fp, "    #0 0x%zx in %s+%x\n", orig_pc, module, offset);
+
+            fprintf(fp, "================================================================\n");
+
+            fprintf(fp, "Context:\n"
+                "  rax=%.16llx rbx=%.16llx rcx=%.16llx rdx=%.16llx\n"
+                "  rsi=%.16llx rdi=%.16llx rsp=%.16llx rbp=%.16llx\n"
+                "   r8=%.16llx  r9=%.16llx r10=%.16llx r11=%.16llx\n"
+                "  r12=%.16llx r13=%.16llx r14=%.16llx r15=%.16llx\n"
+                "  rip=%.16llx rflags=%.16llx\n",
+                ctx->xax, ctx->xbx, ctx->xcx, ctx->xdx,
+                ctx->xsi, ctx->xdi, ctx->xsp, ctx->xbp,
+                ctx->r8, ctx->r9, ctx->r10, ctx->r11,
+                ctx->r12, ctx->r13, ctx->r14, ctx->r15,
+                ctx->pc, ctx->xflags);
+
+
+            char disasm[128];
+            int printed;
+
+            disassemble_set_syntax(DR_DISASM_INTEL);
+            disassemble_to_buffer(drcontext, ctx->pc, ctx->pc,
+                /*show_pc=*/true, /*show_bytes=*/false,
+                disasm, sizeof(disasm), &printed);
+
+
+            fprintf(fp, "================================================================\n");
+            fprintf(fp, "Faulting Code:\n");
+            fprintf(fp, "    %s\n", disasm);
+        }
+    }
+    fclose(fp);
+
+}
 static bool
 onexception(void *drcontext, dr_exception_t *excpt) {
     DWORD exception_code = excpt->record->ExceptionCode;
@@ -229,13 +323,14 @@ onexception(void *drcontext, dr_exception_t *excpt) {
        (exception_code == EXCEPTION_STACK_OVERFLOW) ||
        (exception_code == STATUS_STACK_BUFFER_OVERRUN) ||
        (exception_code == STATUS_FATAL_APP_EXIT)) {
-            if(options.debug_mode) {
-                dr_fprintf(winafl_data.log, "crashed\n");
-            } else {
-				WriteCommandToPipe('C');
-				WriteDWORDCommandToPipe(exception_code);				
-            }
-            dr_exit_process(1);
+        dumpexception(drcontext, excpt);
+        if(options.debug_mode) {
+            dr_fprintf(winafl_data.log, "crashed\n");
+        } else {
+            WriteCommandToPipe('C');
+            WriteDWORDCommandToPipe(exception_code);				
+        }
+        dr_exit_process(1);
     }
     return true;
 }
