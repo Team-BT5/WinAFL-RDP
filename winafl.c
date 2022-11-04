@@ -38,6 +38,7 @@
 #include "utils.h"
 #include "hashtable.h"
 #include "drtable.h"
+#include "types.h"
 #include "limits.h"
 #include <string.h>
 #include <stdlib.h>
@@ -61,6 +62,10 @@
 static uint verbose;
 unsigned int crash_idx;
 
+
+#define MAX_SAMPLE_SIZE 1000000
+#define SHM_SIZE (4 + MAX_SAMPLE_SIZE)
+unsigned char* shm_data;
 #define NOTIFY(level, fmt, ...) do {          \
     if (verbose >= (level))                   \
         dr_fprintf(STDERR, fmt, __VA_ARGS__); \
@@ -93,6 +98,7 @@ typedef struct _winafl_option_t {
     char fuzz_method[MAXIMUM_PATH];
     char pipe_name[MAXIMUM_PATH];
     char shm_name[MAXIMUM_PATH];
+    char sample_shm_name[MAXIMUM_PATH];
     unsigned long fuzz_offset;
     int fuzz_iterations;
     void **func_args;
@@ -101,6 +107,10 @@ typedef struct _winafl_option_t {
     bool thread_coverage;
     bool no_loop;
 	bool dr_persist_cache;
+    // Custom Options 
+    bool in_memory;
+    int pdu_idx;
+    int len_idx;
 } winafl_option_t;
 static winafl_option_t options;
 
@@ -150,6 +160,32 @@ enum {
     NUDGE_TERMINATE_PROCESS = 1,
 };
 
+int setup_sample_shmem(const char* name) {
+    HANDLE map_file;
+
+    map_file = OpenFileMapping(
+        FILE_MAP_ALL_ACCESS,   // read/write access
+        FALSE,                 // do not inherit the name
+        name);            // name of mapping object
+
+    if (map_file == NULL) {
+        printf("Error accessing shared memory\n");
+        return 0;
+    }
+
+    shm_data = (unsigned char*)MapViewOfFile(map_file, // handle to map object
+        FILE_MAP_ALL_ACCESS,  // read/write permission
+        0,
+        0,
+        SHM_SIZE);
+
+    if (shm_data == NULL) {
+        printf("Error accessing shared memory\n");
+        return 0;
+    }
+
+    return 1;
+}
 static void
 event_nudge(void *drcontext, uint64 argument)
 {
@@ -249,11 +285,11 @@ const char* get_exception_symbol(DWORD exception_code) {
     }
 
 }
-static bool
+static void
 dumpexception(void* drcontext, dr_exception_t* excpt) {
     crash_idx++;
     char file_name[100];
-    
+
     snprintf(file_name, 100, "crash_%02d.txt", crash_idx);
     FILE* fp = fopen(file_name, "wb");
 
@@ -636,6 +672,18 @@ pre_fuzz_handler(void *wrapcxt, INOUT void **user_data)
                 drwrap_set_arg(wrapcxt, i, options.func_args[i]);
         }
     }
+    if (options.in_memory) {
+        size_t inout;
+        if (options.pdu_idx == -1 || options.len_idx == -1) {
+            printf("FATAL: Invalid PDU & Length Index");
+            exit(-1);
+        }
+        // Set PDU memory
+        dr_safe_write(options.func_args[options.pdu_idx], *(u32*)shm_data, shm_data + 4, &inout);
+      
+        // Set PDU length register
+        drwrap_set_arg(wrapcxt, options.len_idx, (void*)(* (u32*)shm_data));
+    }
 
     memset(winafl_data.afl_area, 0, MAP_SIZE);
 
@@ -982,8 +1030,10 @@ options_init(client_id_t id, int argc, const char *argv[])
             USAGE_CHECK((i + 1) < argc, "missing fuzzer id");
             strcpy(options.pipe_name, "\\\\.\\pipe\\afl_pipe_");
             strcpy(options.shm_name, "afl_shm_");
+            strcpy(options.sample_shm_name, "sample_afl_shm_");
             strcat(options.pipe_name, argv[i+1]);
             strcat(options.shm_name, argv[i+1]);
+            strcat(options.sample_shm_name, argv[i+1]);
             i++;
         }
         else if (strcmp(token, "-covtype") == 0) {
@@ -1047,6 +1097,19 @@ options_init(client_id_t id, int argc, const char *argv[])
 		else if (strcmp(token, "-drpersist") == 0) {
 			options.dr_persist_cache = true;
 		}
+        else if (strcmp(token, "-in_memory") == 0) {
+            options.in_memory = true;
+            options.pdu_idx = -1;
+            options.len_idx = -1;
+        }
+        else if (strcmp(token, "-pdu") == 0) {
+            options.pdu_idx = atoi(argv[++i]);
+        }
+        else if (strcmp(token, "-len") == 0) {
+            options.len_idx = atoi(argv[++i]);
+        }
+
+
 		else if (strcmp(token, "-persistence_mode") == 0) {
 			USAGE_CHECK((i + 1) < argc, "missing mode arg: '-fuzz_mode' arg");
 			const char* mode = argv[++i];
@@ -1087,7 +1150,7 @@ dr_client_main(client_id_t id, int argc, const char *argv[])
     drwrap_init();
 
     options_init(id, argc, argv);
-
+    setup_sample_shmem(options.sample_shm_name);
     dr_register_exit_event(event_exit);
 
     drmgr_register_exception_event(onexception);
