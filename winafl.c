@@ -287,13 +287,13 @@ const char* get_exception_symbol(DWORD exception_code) {
 }
 static void
 dumpexception(void* drcontext, dr_exception_t* excpt) {
-    crash_idx++;
     char file_name[100];
+    DWORD exception_code = excpt->record->ExceptionCode;
 
-    snprintf(file_name, 100, "crash_%02d.txt", crash_idx);
+    // mutex needed?
+    snprintf(file_name, 100, "CRASH_%02d_%s.txt", ++crash_idx, get_exception_symbol(exception_code));
     FILE* fp = fopen(file_name, "wb");
 
-    DWORD exception_code = excpt->record->ExceptionCode;
     fprintf(fp, "%s:\n", get_exception_symbol(exception_code));
 
     if (excpt) {
@@ -339,6 +339,35 @@ dumpexception(void* drcontext, dr_exception_t* excpt) {
             fprintf(fp, "================================================================\n");
             fprintf(fp, "Faulting Code:\n");
             fprintf(fp, "    %s\n", disasm);
+
+            fprintf(fp, "================================================================\n");
+            fprintf(fp, "Call Stack:\n");
+            
+            unsigned char stack[0x4000];
+            
+            size_t read_bytes;
+            size_t stack_offset = 0;
+
+            dr_safe_read(ctx->xsp, sizeof(stack), stack, &read_bytes);
+
+            read_bytes -= read_bytes % 8;
+            while (read_bytes) {
+                u64 value = *((u64*)(stack+stack_offset));
+                module = NULL;
+                module_entry_t* entry = module_table_lookup(NULL, 0, module_table, value);
+                
+                if (entry)
+                {
+                    module = dr_module_preferred_name(entry->data);
+                    offset = (size_t)value  - (size_t)entry->data->start;
+                }
+
+                if (module) fprintf(fp, " [0x%04x] 0x%zx in %s+%x\n", stack_offset, value, module, offset);
+                else        fprintf(fp, " [0x%04x] %.16llx\n", stack_offset, value);
+
+                stack_offset += 8;
+                read_bytes -= 8;
+            }            
         }
     }
     fclose(fp);
