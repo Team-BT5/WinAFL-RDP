@@ -1038,6 +1038,10 @@ options_init(client_id_t id, int argc, const char *argv[])
 	options.dr_persist_cache = false;
     dr_snprintf(options.logdir, BUFFER_SIZE_ELEMENTS(options.logdir), ".");
 
+    options.in_memory = false;
+    options.pdu_idx = -1;
+    options.len_idx = -1;
+
     strcpy(options.pipe_name, "\\\\.\\pipe\\afl_pipe_default");
     strcpy(options.shm_name, "afl_shm_default");
 
@@ -1128,8 +1132,6 @@ options_init(client_id_t id, int argc, const char *argv[])
 		}
         else if (strcmp(token, "-in_memory") == 0) {
             options.in_memory = true;
-            options.pdu_idx = -1;
-            options.len_idx = -1;
         }
         else if (strcmp(token, "-pdu") == 0) {
             options.pdu_idx = atoi(argv[++i]);
