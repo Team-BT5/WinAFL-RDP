@@ -708,6 +708,8 @@ pre_fuzz_handler(void *wrapcxt, INOUT void **user_data)
             exit(-1);
         }
         // Set PDU memory
+        // memory protection needed for gfx fuzzing, but we will skip now ~
+        //dr_memory_protect(options.func_args[options.pdu_idx], *(u32*)shm_data, DR_MEMPROT_READ | DR_MEMPROT_WRITE)
         dr_safe_write(options.func_args[options.pdu_idx], *(u32*)shm_data, shm_data + 4, &inout);
       
         // Set PDU length register

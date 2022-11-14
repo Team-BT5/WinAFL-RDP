@@ -31,6 +31,9 @@
 
 #define WIN32_LEAN_AND_MEAN /* prevent winsock.h to be included in windows.h */
 
+#include <winsock2.h>
+#pragma comment (lib, "Ws2_32.lib")
+
 #define _CRT_RAND_S
 #define MAX_SAMPLE_SIZE 1000000
 
@@ -68,9 +71,13 @@
 #  include <sys/sysctl.h>
 #endif /* __APPLE__ || __FreeBSD__ || __OpenBSD__ */
 
+BOOL init; WSADATA wsaData; SOCKET s; struct sockaddr_in server;
+
 /* Lots of globals, but mostly for the status UI and other things where it
    really makes no sense to haul them around as function parameters. */
 BOOL use_sample_shared_memory = FALSE;
+BOOL use_socket_delivery = FALSE;
+
 static u8 *in_dir,                    /* Input directory with test cases  */
           *out_file,                  /* File to fuzz, if any             */
           *out_dir,                   /* Working & output directory       */
@@ -2935,6 +2942,30 @@ static u8 run_target(char** argv, u32 timeout) {
    truncated. */
 
 static void write_to_testcase(void* mem, u32 len) {
+
+    if (use_socket_delivery) {
+        if (init == 0) {
+            int iResult;
+
+            iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+            if (iResult != 0) {
+                printf("WSAStartup failed with error: %d\n", iResult);
+                return 1;
+            }
+            s = socket(AF_INET, SOCK_STREAM, 0);
+            if (s == INVALID_SOCKET) FATAL("cannot open socket, GLE: %d", WSAGetLastError());
+
+            server.sin_addr.s_addr = inet_addr("127.0.0.1");
+            server.sin_family = AF_INET;
+            server.sin_port = htons(12345);
+
+            if (connect(s, (struct sockaddr*)&server, sizeof(server)) < 0) FATAL("cannot connect to server");
+            init = 1;
+            ACTF("Connected to Server");
+        }
+
+        if (send(s, mem, len, 0) < 0) FATAL("cannot send to server");
+    }
 
   if (dll_write_to_testcase_ptr) {	  
       dll_write_to_testcase_ptr(out_file, out_fd, mem, len);
@@ -8169,9 +8200,17 @@ int main(int argc, char** argv) {
   client_params = NULL;
   winafl_dll_path = NULL;
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:I:T:sdYnCB:S:M:x:QD:b:l:pPc:w:A:eV")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:I:T:sxdYnCB:S:M:x:QD:b:l:pPc:w:A:eV")) > 0)
 
     switch (opt) {
+
+        case 'x':
+
+        if (use_socket_delivery) FATAL("Multiple -x options not supported");
+        use_socket_delivery = TRUE;
+        ACTF("using socket delivery...");
+        break;
+
       case 's':
         
         if (use_sample_shared_memory) FATAL("Multiple -s options not supported");
