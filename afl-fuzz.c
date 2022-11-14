@@ -2949,8 +2949,8 @@ static void write_to_testcase(void* mem, u32 len) {
 
             iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
             if (iResult != 0) {
-                printf("WSAStartup failed with error: %d\n", iResult);
-                return 1;
+                FATAL("WSAStartup failed with error: %d\n", iResult);
+                
             }
             s = socket(AF_INET, SOCK_STREAM, 0);
             if (s == INVALID_SOCKET) FATAL("cannot open socket, GLE: %d", WSAGetLastError());
@@ -8200,11 +8200,11 @@ int main(int argc, char** argv) {
   client_params = NULL;
   winafl_dll_path = NULL;
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:I:T:sxdYnCB:S:M:x:QD:b:l:pPc:w:A:eV")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:I:T:sXdYnCB:S:M:x:QD:b:l:pPc:w:A:eV")) > 0)
 
     switch (opt) {
 
-        case 'x':
+        case 'X':
 
         if (use_socket_delivery) FATAL("Multiple -x options not supported");
         use_socket_delivery = TRUE;
