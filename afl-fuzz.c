@@ -71,12 +71,14 @@
 #  include <sys/sysctl.h>
 #endif /* __APPLE__ || __FreeBSD__ || __OpenBSD__ */
 
-BOOL init; WSADATA wsaData; SOCKET s; struct sockaddr_in server;
+BOOL socket_init; WSADATA wsaData; SOCKET s; struct sockaddr_in server;
 
 /* Lots of globals, but mostly for the status UI and other things where it
    really makes no sense to haul them around as function parameters. */
 BOOL use_sample_shared_memory = FALSE;
+BOOL use_socket = FALSE;
 BOOL use_socket_delivery = FALSE;
+BOOL use_socket_init = FALSE;
 
 static u8 *in_dir,                    /* Input directory with test cases  */
           *out_file,                  /* File to fuzz, if any             */
@@ -2870,6 +2872,11 @@ static u8 run_target(char** argv, u32 timeout) {
     destroy_target_process(0);
     create_target_process(argv);
     fuzz_iterations_current = 0;
+    if (use_socket_init) {
+        char buf[10];
+        int res = recv(s, buf, sizeof(buf), 0);
+        if (res < 0) FATAL("Init recv failed\n");
+    }
   }
 
   if (dll_run_ptr)
@@ -2942,9 +2949,19 @@ static u8 run_target(char** argv, u32 timeout) {
    truncated. */
 
 static void write_to_testcase(void* mem, u32 len) {
+    //output filtering for RDPEVOR Fuzzing
+    //if (len >= 8) {
+    //    *(u32*)mem = len;
+    //    *((u32*)mem + 1) %= 4;
+    //    if (*((u32*)mem + 1) == 0) *((u32*)mem + 1) += 4;
+    //}
 
-    if (use_socket_delivery) {
-        if (init == 0) {
+    //if (*((u32*)mem + 1) == 1 && len >= 48 ) {
+    //    *((u64*)mem + 5) = 0xaaaaaaaaaaaaaaaa;
+    //}
+
+    if (use_socket) {
+        if (socket_init == 0) {
             int iResult;
 
             iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -2960,11 +2977,13 @@ static void write_to_testcase(void* mem, u32 len) {
             server.sin_port = htons(12345);
 
             if (connect(s, (struct sockaddr*)&server, sizeof(server)) < 0) FATAL("cannot connect to server");
-            init = 1;
+            socket_init = 1;
             ACTF("Connected to Server");
         }
 
-        if (send(s, mem, len, 0) < 0) FATAL("cannot send to server");
+        if (use_socket_delivery) {
+            if (send(s, mem, len, 0) < 0) FATAL("cannot send to server");
+        }
     }
 
   if (dll_write_to_testcase_ptr) {	  
@@ -8200,16 +8219,28 @@ int main(int argc, char** argv) {
   client_params = NULL;
   winafl_dll_path = NULL;
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:I:T:sXdYnCB:S:M:x:QD:b:l:pPc:w:A:eV")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:I:T:sXFGHdYnCB:S:M:x:QD:b:l:pPc:w:A:eV")) > 0)
 
     switch (opt) {
 
-        case 'X':
+        case 'F':
+            if (use_socket) FATAL("Multiple -F options not supported");
+            use_socket = TRUE;
+            ACTF("using socket...");
+            break;
 
-        if (use_socket_delivery) FATAL("Multiple -x options not supported");
-        use_socket_delivery = TRUE;
-        ACTF("using socket delivery...");
-        break;
+        case 'G':
+            if (use_socket_delivery) FATAL("Multiple -G options not supported");
+            use_socket_delivery = TRUE;
+            ACTF("using socket delivery...");
+            break;
+
+        case 'H':
+            if (use_socket_init) FATAL("Multiple -H options not supported");
+            use_socket_init = TRUE;
+            ACTF("using socket initialization...");
+            break;
+
 
       case 's':
         
