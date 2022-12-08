@@ -1,12 +1,8 @@
 # README - Modification for RDP Fuzzing
 
----
-
 We added some modification to fuzz Microsoft RDP client. Description is as follows.
 
 ## Socket Delivery
-
----
 
 For RDP Fuzzing, we need server agent to receive fuzzer input, and send it back to client using WTS API. Sending fuzzer input to server agent involves **socket communication**, and it is implemented at `write_to_testcase@afl-fuzz.c`. 
  
@@ -20,8 +16,6 @@ By giving following options(-F, -G, -H), fuzzing input can be delivered by socke
 ```
 
 ## In-memory Fuzzing
-
----
 
 Until current research about RDP fuzzing, server agent was used to send back fuzzing input. We introduced **in-memory fuzzing method** to fuzz without sever agent. In this method, we directly deliver sample into process memory. This method brings two advantages.
 
@@ -45,8 +39,6 @@ By giving below options, fuzzing input can be delivered into target process memo
 -H option in the previous section is used to trigger target function for the first time when performing in-memory fuzzing. After reaching target funcion once, WinAFL will force persistent loop.
 
 ## Dump Crash Context & Call Stack
-
----
 
 Crashes from RDP fuzzer is often not reproducible. To better reproduce the crash, we implemented **machine context and call stack dump** when crush occurs. Dumped example is as follows.
 
