@@ -2,6 +2,7 @@
 
 We added some modification to fuzz Microsoft RDP client. Description is as follows.
 
+
 ## Socket Delivery
 
 For RDP Fuzzing, we need server agent to receive fuzzer input, and send it back to client using WTS API. Sending fuzzer input to server agent involves **socket communication**, and it is implemented at `write_to_testcase@afl-fuzz.c`. 
