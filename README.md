@@ -1,3 +1,85 @@
+# README - Modification for RDP Fuzzing
+
+---
+
+We added some modification to fuzz Microsoft RDP client. Description is as follows.
+
+## Socket Delivery
+
+---
+
+For RDP Fuzzing, we need server agent to receive fuzzer input, and send it back to client using WTS API. Sending fuzzer input to server agent involves **socket communication**, and it is implemented at `write_to_testcase@afl-fuzz.c`. 
+ 
+
+By giving following options(-F, -G, -H), fuzzing input can be delivered by socket. -H option is used during *in-memory fuzzing*, described below.
+
+```
+-F      - initilalize fuzzer socket
+-G      - use socket to deliver fuzzing input, must be used with -F option
+-H      - use socket to reach target function, sent only once when program (re)starts
+```
+
+## In-memory Fuzzing
+
+---
+
+Until current research about RDP fuzzing, server agent was used to send back fuzzing input. We introduced **in-memory fuzzing method** to fuzz without sever agent. In this method, we directly deliver sample into process memory. This method brings two advantages.
+
+- Forced loop
+- Excluding socket communication
+
+When fuzzer first reaches target function, DynamoRIO saves register state. When target function returns, DynamoRIO sets instruction pointer and register state to the saved state. In-memory fuzzing implementation not only restores register context, but also writes fuzzing input at the process memory pointing PDU buffer. It also sets length argument to length of fuzzing input.
+
+ClassName::OnDataReceived(ClassName *this, unsigned int pduLength, unsigned __int8 *pdu)
+
+RDP fuzzing target function often looks like above. When restoring register context, we patched WinAFL pre-fuzz handler to write fuzzing input at the memory pointed by 3rd argument register, and set 2nd argument register to length of fuzzing input. Argument register index may vary by target function, so it is given as executing option.
+
+By giving below options, fuzzing input can be delivered into target process memory.
+
+```
+-in_memory      - deliver fuzzing input directly into process memory
+-pdu            - index of target funcion argument pointing PDU buffer
+-len            - index of target funtion argument containing PDU length 
+```
+
+-H option in the previous section is used to trigger target function for the first time when performing in-memory fuzzing. After reaching target funcion once, WinAFL will force persistent loop.
+
+## Dump Crash Context & Call Stack
+
+---
+
+Crashes from RDP fuzzer is often not reproducible. To better reproduce the crash, we implemented **machine context and call stack dump** when crush occurs. Dumped example is as follows.
+
+```
+EXCEPTION_ACCESS_VIOLATION:
+    #0 0x7ffe2be82200 in mstscax.dll+2a2200
+================================================================
+Context:
+  rax=000000000001020b rbx=0000000000000000 rcx=0000026c12fe13c2 rdx=0000026a11010000
+  rsi=0000000000000000 rdi=0000026c1463ab50 rsp=0000008bd43ff5f0 rbp=0000008bd43ff638
+   r8=0000000000000000  r9=0000008bd43ff6e0 r10=0000026c12fe13c2 r11=0000026c12ff15cc
+  r12=0000026c12fe13c1 r13=0000008bd43ff788 r14=00007ffe2c2cc624 r15=0000026c12ff15c0
+  rip=00007ffe2be82200 rflags=0000000000010202
+================================================================
+Faulting Code:
+      0x00007ffe2be82200 movzx  edx, byte ptr [r11]
+
+================================================================
+Call Stack:
+ [0x0000] 0000e9c7aa63dad9
+ [0x0008] 0000000000000000
+ [0x0010] 0x7ffe2c2740c0 in mstscax.dll+6940c0
+ [0x0018] 0x7ffe2c2acc98 in mstscax.dll+6ccc98
+ [0x0020] 0000026c12ff15cc
+ [0x0028] 0x7ffe2bc13e21 in mstscax.dll+33e21
+ [0x0030] 000000000000000b
+ [0x0038] 0000000000000004
+ [0x0040] 000000008007006f
+ [0x0048] 000000000001020c
+ [0x0050] 0x7ffe2c2cc624 in mstscax.dll+6ec624
+ [0x0058] 0000008bd43ff788
+ [0x0060] 0000026c12fe13c1
+```
 # WinAFL
 
 ```
